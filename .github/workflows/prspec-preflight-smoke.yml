@@ -1,82 +1,84 @@
-name: PRSpec preflight smoke
+name: PRSpec diagnostic preflight
 on:
   push:
     branches: [prspec-pilot-preflight-20261110]
     paths: [.github/workflows/prspec-preflight-smoke.yml]
-permissions: {}
+permissions:
+  actions: read
+  contents: read
 jobs:
-  smoke:
+  diagnostics:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 12
     steps:
-      - name: Test Meta with a bounded request
-        id: meta
+      - name: Diagnose original failed run without exposing log contents
+        id: logs
         env:
-          MODEL_API_KEY: ${{ secrets.PRSPEC_META_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          python3 - <<'PY'
-          import json, os, urllib.error, urllib.request
-          result = 'other_error'
+          python3 - <<'CODE'
+          import json, os, re, urllib.request
+          repo = os.environ['GITHUB_REPOSITORY']
+          runs = {'Hardisky/besu':'43122516246', 'Hardisky/PRSpec':'43122522120'}
+          headers = {'Authorization': 'Bearer '+os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json', 'User-Agent':'PRSpec-preflight'}
+          def get(url):
+              with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30) as response:
+                  return response.read(5000000)
+          reason = 'no_matching_output'
           try:
-              key = os.environ.get('MODEL_API_KEY', '')
-              if not key:
-                  result = 'secret_missing'
-              else:
-                  body = {'model': 'muse-wonder-1.0', 'messages': [{'role': 'user', 'content': 'Reply with exactly OK.'}], 'max_tokens': 256}
-                  req = urllib.request.Request('https://api.meta.ai/v1/chat/completions', data=json.dumps(body).encode(), headers={'Authorization': 'Bearer '+key, 'Content-Type':'application/json'}, method='POST')
-                  with urllib.request.urlopen(req, timeout=90) as response:
-                      payload = json.load(response)
-                  choices = payload.get('choices') or []
-                  result = 'ok' if choices and (choices[0].get('message') or {}).get('content') else 'empty_response'
-          except urllib.error.HTTPError as exc:
-              result = 'http_' + str(exc.code) if exc.code in (400, 401, 403, 404, 429, 500, 503) else 'http_other'
-          except urllib.error.URLError:
-              result = 'network_error'
+              jobs=json.loads(get(f'https://api.github.com/repos/{repo}/actions/runs/{runs[repo]}/jobs'))['jobs']
+              lines=get(f'https://api.github.com/repos/{repo}/actions/jobs/{jobs[0]["id"]}/logs').decode('utf-8', 'replace').splitlines()
+              for line in lines:
+                  m=re.match(r'^\d{4}-\d\d-\d\dT\S+Z (FAIL: .*)$', line)
+                  if not m:
+                      continue
+                  msg=m.group(1)
+                  if msg == 'FAIL: PRSPEC_META_API_KEY unavailable to this job': reason='secret_missing'
+                  elif msg == 'FAIL: Meta returned no message content': reason='empty_response'
+                  elif re.fullmatch(r'FAIL: Meta HTTP status (400|401|403|404|429|500|503)', msg): reason='http_'+msg.rsplit(' ',1)[-1]
+                  elif msg.startswith('FAIL: Meta HTTP status '): reason='http_other'
+                  elif msg.startswith('FAIL: Meta request error:'): reason='request_error'
           except Exception:
-              result = 'other_error'
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
-              output.write('result=' + result + '\n')
-          print('Preflight result:', result)
-          PY
-      - name: Meta OK
-        if: steps.meta.outputs.result == 'ok'
-        run: echo 'Meta request passed'
-      - name: Meta secret missing
-        if: steps.meta.outputs.result == 'secret_missing'
-        run: echo 'Secret unavailable'
-      - name: Meta HTTP 400
-        if: steps.meta.outputs.result == 'http_400'
-        run: echo 'Bad request'
-      - name: Meta HTTP 401
-        if: steps.meta.outputs.result == 'http_401'
-        run: echo 'Authentication failed'
-      - name: Meta HTTP 403
-        if: steps.meta.outputs.result == 'http_403'
-        run: echo 'Access denied'
-      - name: Meta HTTP 404
-        if: steps.meta.outputs.result == 'http_404'
-        run: echo 'Endpoint or resource not found'
-      - name: Meta HTTP 429
-        if: steps.meta.outputs.result == 'http_429'
-        run: echo 'Rate or quota limited'
-      - name: Meta HTTP 500
-        if: steps.meta.outputs.result == 'http_500'
-        run: echo 'Service error'
-      - name: Meta HTTP 503
-        if: steps.meta.outputs.result == 'http_503'
-        run: echo 'Service unavailable'
-      - name: Meta HTTP other
-        if: steps.meta.outputs.result == 'http_other'
-        run: echo 'Other HTTP error'
-      - name: Meta empty response
-        if: steps.meta.outputs.result == 'empty_response'
-        run: echo 'No message content'
-      - name: Meta network error
-        if: steps.meta.outputs.result == 'network_error'
-        run: echo 'Network error'
-      - name: Meta other error
-        if: steps.meta.outputs.result == 'other_error'
-        run: echo 'Other error'
-      - name: Require successful response
-        if: steps.meta.outputs.result != 'ok'
-        run: exit 1
+              reason='logs_unavailable'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('reason='+reason+'\n')
+          print('Only a fixed diagnostic category is exposed.')
+          CODE
+      - name: Earlier failure secret_missing
+        if: steps.logs.outputs.reason == 'secret_missing'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure empty_response
+        if: steps.logs.outputs.reason == 'empty_response'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_400
+        if: steps.logs.outputs.reason == 'http_400'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_401
+        if: steps.logs.outputs.reason == 'http_401'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_403
+        if: steps.logs.outputs.reason == 'http_403'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_404
+        if: steps.logs.outputs.reason == 'http_404'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_429
+        if: steps.logs.outputs.reason == 'http_429'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_500
+        if: steps.logs.outputs.reason == 'http_500'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_503
+        if: steps.logs.outputs.reason == 'http_503'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure http_other
+        if: steps.logs.outputs.reason == 'http_other'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure request_error
+        if: steps.logs.outputs.reason == 'request_error'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure no_matching_output
+        if: steps.logs.outputs.reason == 'no_matching_output'
+        run: echo Diagnostic category confirmed
+      - name: Earlier failure logs_unavailable
+        if: steps.logs.outputs.reason == 'logs_unavailable'
+        run: echo Diagnostic category confirmed
