@@ -25,8 +25,10 @@ jobs:
               with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30) as response:
                   return response.read(5000000)
           reason = 'no_matching_output'
+          stage = 'jobs'
           try:
               jobs=json.loads(get(f'https://api.github.com/repos/{repo}/actions/runs/{runs[repo]}/jobs'))['jobs']
+              stage='logs'
               lines=get(f'https://api.github.com/repos/{repo}/actions/jobs/{jobs[0]["id"]}/logs').decode('utf-8', 'replace').splitlines()
               for line in lines:
                   m=re.match(r'^\d{4}-\d\d-\d\dT\S+Z (FAIL: .*)$', line)
@@ -38,8 +40,10 @@ jobs:
                   elif re.fullmatch(r'FAIL: Meta HTTP status (400|401|403|404|429|500|503)', msg): reason='http_'+msg.rsplit(' ',1)[-1]
                   elif msg.startswith('FAIL: Meta HTTP status '): reason='http_other'
                   elif msg.startswith('FAIL: Meta request error:'): reason='request_error'
+          except urllib.error.HTTPError as exc:
+              reason=stage+'_http_'+str(exc.code) if exc.code in (401,403,404,429,500,503) else stage+'_http_other'
           except Exception:
-              reason='logs_unavailable'
+              reason=stage+'_exception'
           with open(os.environ['GITHUB_OUTPUT'],'a') as f: f.write('reason='+reason+'\n')
           print('Only a fixed diagnostic category is exposed.')
           CODE
@@ -81,4 +85,52 @@ jobs:
         run: echo Diagnostic category confirmed
       - name: Earlier failure logs_unavailable
         if: steps.logs.outputs.reason == 'logs_unavailable'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_401
+        if: steps.logs.outputs.reason == 'jobs_http_401'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_403
+        if: steps.logs.outputs.reason == 'jobs_http_403'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_404
+        if: steps.logs.outputs.reason == 'jobs_http_404'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_429
+        if: steps.logs.outputs.reason == 'jobs_http_429'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_500
+        if: steps.logs.outputs.reason == 'jobs_http_500'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_503
+        if: steps.logs.outputs.reason == 'jobs_http_503'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_http_other
+        if: steps.logs.outputs.reason == 'jobs_http_other'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access jobs_exception
+        if: steps.logs.outputs.reason == 'jobs_exception'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_401
+        if: steps.logs.outputs.reason == 'logs_http_401'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_403
+        if: steps.logs.outputs.reason == 'logs_http_403'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_404
+        if: steps.logs.outputs.reason == 'logs_http_404'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_429
+        if: steps.logs.outputs.reason == 'logs_http_429'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_500
+        if: steps.logs.outputs.reason == 'logs_http_500'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_503
+        if: steps.logs.outputs.reason == 'logs_http_503'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_http_other
+        if: steps.logs.outputs.reason == 'logs_http_other'
+        run: echo Diagnostic category confirmed
+      - name: Diagnostic access logs_exception
+        if: steps.logs.outputs.reason == 'logs_exception'
         run: echo Diagnostic category confirmed
